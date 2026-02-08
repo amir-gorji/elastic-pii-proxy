@@ -1,0 +1,26 @@
+{
+  "inputs": [
+    {
+      "id": "KIBANA_URL",
+      "type": "promptString",
+      "description": "The URL of your Kibana instance. For example: https://my-deployment-5d3814.kb.europe-west4.gcp.elastic-cloud.com",
+      "password": false
+    },
+    {
+      "id": "KIBANA_API_KEY",
+      "type": "promptString",
+      "description": "Your Kibana API key. You can create an API key in the Kibana Management section under Security > API Keys.",
+      "password": true
+    }
+  ],
+  "servers": {
+    "kibana-dashboard": {
+      "command": "node",
+      "args": ["./dist/stdio.mjs"],
+      "env": {
+        "KIBANA_URL": "${input:KIBANA_URL}",
+        "KIBANA_API_KEY": "${input:KIBANA_API_KEY}"
+      }
+    }
+  }
+}
