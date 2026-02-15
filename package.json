@@ -15,7 +15,7 @@
     "@mastra/core": "^1.2.0",
     "@mastra/mcp": "^1.0.0",
     "axios": "^1.13.4",
-    "dismatch": "^0.0.2",
+    "dismatch": "^0.0.3",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
   },

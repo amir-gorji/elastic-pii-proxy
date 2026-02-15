@@ -10,11 +10,11 @@ This MCP server bridges that gap. It lets an LLM agent discover your cluster, un
 
 ### Who is this for?
 
-| Persona | What they get |
-|---------|--------------|
-| **Business Manager** | Ask natural-language questions about transaction volumes, onboarding funnels, or liquidity metrics. The agent builds the DSL query for you. |
-| **Software Architect** | Explore cluster topology, review index mappings, and assess system health without context-switching to Kibana. |
-| **Developer** | Debug by correlating logs across microservices. Search for error patterns, trace transaction IDs, and inspect field mappings — conversationally. |
+| Persona                | What they get                                                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Business Manager**   | Ask natural-language questions about transaction volumes, onboarding funnels, or liquidity metrics. The agent builds the DSL query for you.      |
+| **Software Architect** | Explore cluster topology, review index mappings, and assess system health without context-switching to Kibana.                                   |
+| **Developer**          | Debug by correlating logs across microservices. Search for error patterns, trace transaction IDs, and inspect field mappings — conversationally. |
 
 ## Features
 
@@ -129,11 +129,11 @@ Add to your `claude_desktop_config.json`:
 
 **Start here.** Discovers all available indices and their field mappings. The agent should call this first to understand what data exists before constructing queries.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `pattern` | string | `*` | Index pattern filter (e.g., `logs-*`) |
+| Parameter        | Type    | Default | Description                              |
+| ---------------- | ------- | ------- | ---------------------------------------- |
+| `pattern`        | string  | `*`     | Index pattern filter (e.g., `logs-*`)    |
 | `include_hidden` | boolean | `false` | Include system indices (`.kibana`, etc.) |
-| `max_indices` | number | `50` | Cap on indices to fetch mappings for |
+| `max_indices`    | number  | `50`    | Cap on indices to fetch mappings for     |
 
 Returns indices sorted by doc count (largest first), each with a flat list of `{ field, type }` mappings.
 
@@ -141,12 +141,12 @@ Returns indices sorted by doc count (largest first), each with a flat list of `{
 
 Executes a read-only Elasticsearch DSL query against an index.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `index` | string | *required* | Index pattern to search (e.g., `transactions-*`) |
-| `query` | object | *required* | Elasticsearch DSL query body |
-| `size` | number | `10` | Results to return (capped by `MAX_SEARCH_SIZE`) |
-| `time_range` | string | -- | Time filter expression (e.g., `now-24h`, `now-7d`) |
+| Parameter    | Type   | Default    | Description                                        |
+| ------------ | ------ | ---------- | -------------------------------------------------- |
+| `index`      | string | _required_ | Index pattern to search (e.g., `transactions-*`)   |
+| `query`      | object | _required_ | Elasticsearch DSL query body                       |
+| `size`       | number | `10`       | Results to return (capped by `MAX_SEARCH_SIZE`)    |
+| `time_range` | string | --         | Time filter expression (e.g., `now-24h`, `now-7d`) |
 
 The `time_range` parameter is automatically merged into whatever query shape you provide -- bool queries, simple queries, or empty queries all work.
 
@@ -154,18 +154,18 @@ The `time_range` parameter is automatically merged into whatever query shape you
 
 Lists available Elasticsearch indices with health, status, doc count, and store size.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `pattern` | string | `*` | Index pattern filter |
+| Parameter        | Type    | Default | Description                   |
+| ---------------- | ------- | ------- | ----------------------------- |
+| `pattern`        | string  | `*`     | Index pattern filter          |
 | `include_hidden` | boolean | `false` | Include system/hidden indices |
 
 ### `get_index_mappings`
 
 Returns a flat list of field names and types for a specific index.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `index` | string | *required* | Index name (e.g., `transactions`) |
+| Parameter | Type   | Default    | Description                       |
+| --------- | ------ | ---------- | --------------------------------- |
+| `index`   | string | _required_ | Index name (e.g., `transactions`) |
 
 ## Security & Compliance
 
@@ -175,19 +175,20 @@ This server is designed for regulated environments. Multiple defense layers ensu
 
 All tool responses pass through a redaction layer before leaving the server. The following patterns are detected and masked:
 
-| Data Type | Example Input | Masked Output |
-|-----------|--------------|---------------|
-| Credit Card | `4111 1111 1111 1111` | `**** **** **** 1111` |
-| IBAN | `DE89370400440532013000` | `DE89****3000` |
-| SSN | `123-45-6789` | `***-**-****` |
-| Email | `john.doe@bank.com` | `j***@bank.com` |
-| Phone | `+1 555-123-4567` | `+15***67` |
+| Data Type   | Example Input            | Masked Output         |
+| ----------- | ------------------------ | --------------------- |
+| Credit Card | `4111 1111 1111 1111`    | `**** **** **** 1111` |
+| IBAN        | `DE89370400440532013000` | `DE89****3000`        |
+| SSN         | `123-45-6789`            | `***-**-****`         |
+| Email       | `john.doe@bank.com`      | `j***@bank.com`       |
+| Phone       | `+1 555-123-4567`        | `+15***67`            |
 
 Credit card detection uses Luhn validation to avoid false positives on random 16-digit numbers.
 
 ### Input Sanitization
 
 Every query is scanned for dangerous keywords before execution:
+
 - `script`, `_update`, `_delete`, `_bulk`, `ctx._source`
 
 Index names are validated against a strict regex (`[a-zA-Z0-9\-.*,_]+`) to prevent injection.
@@ -262,7 +263,10 @@ Tool results use [dismatch](https://www.npmjs.com/package/dismatch) discriminate
 import type { Model } from 'dismatch';
 
 type ToolResult<T> = ToolSuccess<T> | ToolError;
-type ToolSuccess<T> = Model<'success', { data: T; total?: number; aggregations?: Record<string, any> }>;
+type ToolSuccess<T> = Model<
+  'success',
+  { data: T; total?: number; aggregations?: Record<string, any> }
+>;
 type ToolError = Model<'error', { error: string }>;
 ```
 
@@ -277,6 +281,10 @@ This server implements the **Phase 1 foundation** of the strategic architecture 
 - **Knowledge Base** -- Semantic discovery of Kibana saved objects (dashboards, visualizations) via `find_knowledge_assets`
 - **SSE Transport** -- HTTP/SSE deployment for multi-agent access from Slack, Teams, or internal platforms
 - **Async Search** -- `_async_search` support for long-running aggregations over large time horizons
+
+## Did I copy it from anywhere?
+
+- No, it's just a spare time project, and I don't mind if anyone uses it or modify it, ... (MIT License).
 
 ## License
 

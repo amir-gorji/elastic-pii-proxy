@@ -1,10 +1,14 @@
 import { MCPServer } from '@mastra/mcp';
 import { allTools } from '../tools';
+import { allPrompts } from '../prompts';
+import { allResources } from '../resources';
 
 const server = new MCPServer({
   name: 'kibana-banking-mcp-server',
   version: '1.0.0',
   tools: allTools,
+  prompts: allPrompts,
+  resources: allResources,
 });
 
 server.startStdio().catch((error) => {
