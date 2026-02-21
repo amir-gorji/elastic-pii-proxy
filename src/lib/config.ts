@@ -29,6 +29,10 @@ export interface ServerConfig {
   auditEnabled: boolean;
   /** Whether to scan and mask PII (credit cards, IBANs, SSNs, etc.) in tool responses. */
   piiRedactionEnabled: boolean;
+  /** AWS region for Comprehend calls (e.g. 'us-east-1'). */
+  awsRegion: string;
+  /** Whether to run Stage 2 NER-based PII redaction via AWS Comprehend. */
+  comprehendEnabled: boolean;
 }
 
 /** @throws {Error} If the environment variable is not set. */
@@ -69,5 +73,7 @@ export function loadConfig(): ServerConfig {
     kibanaSpace: process.env.KIBANA_SPACE || '',
     auditEnabled: process.env.AUDIT_ENABLED !== 'false',
     piiRedactionEnabled: process.env.PII_REDACTION_ENABLED !== 'false',
+    awsRegion: process.env.AWS_REGION || 'us-east-1',
+    comprehendEnabled: process.env.COMPREHEND_ENABLED === 'true',
   };
 }

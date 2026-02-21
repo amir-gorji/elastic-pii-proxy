@@ -20,7 +20,7 @@ import { match } from 'dismatch';
 import { loadConfig, ServerConfig } from './config';
 import { ElasticsearchClient } from './esClient';
 import { AuditLogger } from './auditLogger';
-import { redactPII } from './piiRedaction';
+import { redactPIIDeep } from './piiRedaction';
 import { ToolResult } from './types';
 
 /** Shared server configuration singleton. Initialized once on first import. */
@@ -97,19 +97,19 @@ export function createSecureTool<TInput extends z.ZodType, TOutput>(
       }
 
       // PII redaction
-      const { finalResult, redactionCount, redactedTypes } = match(result)({
-        success: (successData) => {
+      const { finalResult, redactionCount, redactedTypes } = await match(result)({
+        success: async (successData) => {
           if (!config.piiRedactionEnabled) {
             return { finalResult: result, redactionCount: 0, redactedTypes: [] as string[] };
           }
-          const redaction = redactPII(successData);
+          const redaction = await redactPIIDeep(successData, config);
           return {
             finalResult: redaction.redactedData as ToolResult<TOutput>,
             redactionCount: redaction.redactionCount,
             redactedTypes: redaction.redactedTypes,
           };
         },
-        error: () => ({
+        error: async () => ({
           finalResult: result,
           redactionCount: 0,
           redactedTypes: [] as string[],
