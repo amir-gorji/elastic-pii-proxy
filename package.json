@@ -1,12 +1,13 @@
 {
-  "name": "kibana-mcp-server",
+  "name": "financial-elastic-mcp-server",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "bin": "dist/stdio.mjs",
   "scripts": {
     "build:mcp": "tsup src/mastra/stdio.ts --format esm,cjs --no-splitting --dts && echo '#!/usr/bin/env node' | cat - dist/stdio.mjs > temp && mv temp dist/stdio.mjs && chmod +x dist/stdio.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:redaction": "tsup scripts/test-redaction.ts --format esm --no-splitting --outDir dist/scripts && node dist/scripts/test-redaction.mjs"
   },
   "keywords": [],
   "author": "",

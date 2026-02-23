@@ -4,7 +4,7 @@ import { allPrompts } from '../prompts';
 import { allResources } from '../resources';
 
 const server = new MCPServer({
-  name: 'kibana-banking-mcp-server',
+  name: 'financial-elastic-mcp-server',
   version: '1.0.0',
   tools: allTools,
   prompts: allPrompts,

@@ -20,7 +20,7 @@ You are investigating the following issue: **{{FAILURE_DESCRIPTION}}**
 Call \`discover_cluster\` with pattern \`{{INDEX_PATTERN}}\` to understand what indices exist and what fields are available. Pay attention to fields related to: status, error_code, error_message, payment_type, amount, currency, sender, receiver, processing_time.
 
 ## Step 2: Assess Failure Volume
-Use \`kibana_search\` to get an overview of failure counts. Build a query that:
+Use \`elastic_search\` to get an overview of failure counts. Build a query that:
 - Filters for failed/rejected/error statuses in the \`{{TIME_RANGE}}\` window
 - Uses a \`terms\` aggregation on the status field to see the distribution
 - Uses a \`date_histogram\` aggregation to see if failures are clustered in time

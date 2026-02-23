@@ -10,7 +10,7 @@
 import type { Resource } from '@mastra/mcp';
 
 export const resource: Resource = {
-  uri: 'kibana-banking://resources/banking-domain-glossary',
+  uri: 'elastic-banking://resources/banking-domain-glossary',
   name: 'Banking Domain Glossary',
   description:
     'Maps banking domain terminology to Elasticsearch field names and query patterns. ' +

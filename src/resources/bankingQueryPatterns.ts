@@ -10,7 +10,7 @@
 import type { Resource } from '@mastra/mcp';
 
 export const resource: Resource = {
-  uri: 'kibana-banking://resources/banking-query-patterns',
+  uri: 'elastic-banking://resources/banking-query-patterns',
   name: 'Banking Elasticsearch Query Patterns',
   description:
     'Common Elasticsearch DSL query patterns for banking data — transaction searches, ' +

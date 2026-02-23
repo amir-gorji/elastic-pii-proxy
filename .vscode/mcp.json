@@ -1,25 +1,53 @@
 {
   "inputs": [
     {
-      "id": "KIBANA_URL",
+      "id": "ELASTIC_URL",
       "type": "promptString",
-      "description": "The URL of your Kibana instance. For example: https://my-deployment-5d3814.kb.europe-west4.gcp.elastic-cloud.com",
+      "description": "The URL of your Elasticsearch instance (e.g., https://my-deployment.es.us-east-1.aws.found.io or http://localhost:9200)",
       "password": false
     },
     {
-      "id": "KIBANA_API_KEY",
+      "id": "ELASTIC_API_KEY",
       "type": "promptString",
-      "description": "Your Kibana API key. You can create an API key in the Kibana Management section under Security > API Keys.",
+      "description": "Your Elastic API key. You can create an API key in the Kibana Management section under Security > API Keys.",
+      "password": true
+    },
+    {
+      "id": "COMPREHEND_ENABLED",
+      "type": "promptString",
+      "description": "(Optional) Set to 'true' to enable Stage 2 NER-based PII redaction via AWS Comprehend. Leave blank to use regex-only redaction (no AWS credentials required).",
+      "password": false
+    },
+    {
+      "id": "AWS_REGION",
+      "type": "promptString",
+      "description": "(Optional) AWS region for Comprehend calls (e.g. us-east-1, eu-west-1). Leave blank to default to us-east-1.",
+      "password": false
+    },
+    {
+      "id": "AWS_ACCESS_KEY_ID",
+      "type": "promptString",
+      "description": "(Optional) AWS access key ID for Comprehend. Leave blank to use the default AWS credential chain (~/.aws/credentials, IAM role, etc.).",
+      "password": false
+    },
+    {
+      "id": "AWS_SECRET_ACCESS_KEY",
+      "type": "promptString",
+      "description": "(Optional) AWS secret access key for Comprehend. Leave blank to use the default AWS credential chain.",
       "password": true
     }
   ],
   "servers": {
-    "kibana-dashboard": {
+    "financial-elastic": {
       "command": "node",
       "args": ["./dist/stdio.mjs"],
       "env": {
-        "KIBANA_URL": "${input:KIBANA_URL}",
-        "KIBANA_API_KEY": "${input:KIBANA_API_KEY}"
+        "ELASTIC_URL": "${input:ELASTIC_URL}",
+        "ELASTIC_API_KEY": "${input:ELASTIC_API_KEY}",
+        "COMPREHEND_ENABLED": "${input:COMPREHEND_ENABLED}",
+        "AWS_REGION": "${input:AWS_REGION}",
+        "AWS_ACCESS_KEY_ID": "${input:AWS_ACCESS_KEY_ID}",
+        "AWS_SECRET_ACCESS_KEY": "${input:AWS_SECRET_ACCESS_KEY}"
       }
     }
   }
