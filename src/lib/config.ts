@@ -1,18 +1,18 @@
 /**
  * Server configuration loaded from environment variables.
  *
- * Required variables: `KIBANA_URL`, `KIBANA_API_KEY`.
+ * Required variables: `ELASTIC_URL`, `ELASTIC_API_KEY`.
  * All other settings have sensible defaults for development.
  *
  * @see {@link loadConfig} for the loader that populates this interface.
  */
 export interface ServerConfig {
-  /** Base URL of the Kibana deployment (e.g., `https://xyz.kb.us-east-1.aws.found.io`). */
-  kibanaUrl: string;
-  /** Elasticsearch URL, derived from {@link kibanaUrl} by replacing `.kb.` with `.es.`. */
+  /** Base URL of the Elasticsearch deployment (e.g., `https://xyz.es.us-east-1.aws.found.io` or `http://localhost:9200`). */
   elasticsearchUrl: string;
-  /** Base64-encoded API key for authenticating with Kibana/Elasticsearch. */
-  kibanaApiKey: string;
+  /** Base URL of the Kibana deployment (optional — required only for Kibana-specific features like alert status). */
+  kibanaUrl?: string;
+  /** Base64-encoded API key for authenticating with Elasticsearch (and Kibana when KIBANA_URL is set). */
+  elasticApiKey: string;
   /** Glob patterns restricting which indices the agent may access. Empty = unrestricted. */
   allowedIndexPatterns: string[];
   /** Hard cap on documents returned per search (1--500). Protects token budgets. */
@@ -47,22 +47,20 @@ function requiredEnv(name: string): string {
 /**
  * Loads server configuration from environment variables.
  *
- * The Elasticsearch URL is derived from the Kibana URL by replacing `.kb.`
- * with `.es.` in the hostname — this matches the Elastic Cloud URL convention.
+ * `ELASTIC_URL` must point directly to your Elasticsearch instance.
+ * `KIBANA_URL` is optional — set it only if you need Kibana-specific features
+ * such as alert status retrieval.
  *
- * @throws {Error} If required variables (`KIBANA_URL`, `KIBANA_API_KEY`) are missing.
+ * @throws {Error} If required variables (`ELASTIC_URL`, `ELASTIC_API_KEY`) are missing.
  */
 export function loadConfig(): ServerConfig {
-  const kibanaUrl = requiredEnv('KIBANA_URL');
-  const elasticsearchUrl = kibanaUrl.replace(/\.kb\./, '.es.');
-
   const maxSearchSizeRaw = parseInt(process.env.MAX_SEARCH_SIZE || '100', 10);
   const maxSearchSize = Math.min(Math.max(1, maxSearchSizeRaw), 500);
 
   return {
-    kibanaUrl,
-    elasticsearchUrl,
-    kibanaApiKey: requiredEnv('KIBANA_API_KEY'),
+    elasticsearchUrl: requiredEnv('ELASTIC_URL'),
+    kibanaUrl: process.env.KIBANA_URL || undefined,
+    elasticApiKey: requiredEnv('ELASTIC_API_KEY'),
     allowedIndexPatterns: process.env.ALLOWED_INDEX_PATTERNS
       ? process.env.ALLOWED_INDEX_PATTERNS.split(',').map((p) => p.trim()).filter(Boolean)
       : [],

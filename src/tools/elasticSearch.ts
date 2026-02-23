@@ -1,5 +1,5 @@
 /**
- * **kibana_search** — Read-only Elasticsearch DSL query execution.
+ * **elastic_search** — Read-only Elasticsearch DSL query execution.
  *
  * The core data retrieval tool. Accepts a full Elasticsearch DSL query body
  * and an optional time range expression. The time range is automatically
@@ -38,14 +38,14 @@ function classifyQuery(body: Record<string, any>): QueryShape {
   return { type: 'no_query', body };
 }
 
-export const kibanaSearchTool = createSecureTool({
-  id: 'kibana_search',
+export const elasticSearchTool = createSecureTool({
+  id: 'elastic_search',
   description:
     'Execute a read-only DSL query against an Elasticsearch index to retrieve logs or data. ' +
     'Supports optional time_range filtering (e.g., "now-24h", "now-7d").',
   mcp: {
     annotations: {
-      title: 'Kibana Search',
+      title: 'Elastic Search',
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,

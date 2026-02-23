@@ -25,9 +25,9 @@ describe('resources registry', () => {
   it('lists the expected URIs', async () => {
     const resources = await allResources.listResources({ extra });
     const uris = resources.map((r) => r.uri);
-    expect(uris).toContain('kibana-banking://resources/banking-query-patterns');
-    expect(uris).toContain('kibana-banking://resources/elasticsearch-best-practices');
-    expect(uris).toContain('kibana-banking://resources/banking-domain-glossary');
+    expect(uris).toContain('elastic-banking://resources/banking-query-patterns');
+    expect(uris).toContain('elastic-banking://resources/elasticsearch-best-practices');
+    expect(uris).toContain('elastic-banking://resources/banking-domain-glossary');
   });
 
   it('getResourceContent returns text for each valid URI', async () => {
@@ -41,7 +41,7 @@ describe('resources registry', () => {
 
   it('getResourceContent throws for unknown URI', async () => {
     await expect(
-      allResources.getResourceContent({ uri: 'kibana-banking://resources/nonexistent', extra }),
+      allResources.getResourceContent({ uri: 'elastic-banking://resources/nonexistent', extra }),
     ).rejects.toThrow('Unknown resource URI');
   });
 });

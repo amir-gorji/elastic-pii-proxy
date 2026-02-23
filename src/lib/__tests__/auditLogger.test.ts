@@ -6,7 +6,7 @@ function makeConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
   return {
     kibanaUrl: 'http://localhost:5601',
     elasticsearchUrl: 'http://localhost:9200',
-    kibanaApiKey: 'test-key',
+    elasticApiKey: 'test-key',
     allowedIndexPatterns: [],
     maxSearchSize: 100,
     requestTimeoutMs: 30000,

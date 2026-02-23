@@ -23,7 +23,7 @@ import { validateIndexName } from './inputSanitizer';
  */
 export class ElasticsearchClient {
   private esHttp: AxiosInstance;
-  private kibanaHttp: AxiosInstance;
+  private kibanaHttp: AxiosInstance | null;
   private config: ServerConfig;
 
   constructor(config: ServerConfig) {
@@ -34,23 +34,27 @@ export class ElasticsearchClient {
       timeout: config.requestTimeoutMs,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `ApiKey ${config.kibanaApiKey}`,
+        Authorization: `ApiKey ${config.elasticApiKey}`,
       },
     });
 
-    const kibanaBaseURL = config.kibanaSpace
-      ? `${config.kibanaUrl}/s/${config.kibanaSpace}`
-      : config.kibanaUrl;
+    if (config.kibanaUrl) {
+      const kibanaBaseURL = config.kibanaSpace
+        ? `${config.kibanaUrl}/s/${config.kibanaSpace}`
+        : config.kibanaUrl;
 
-    this.kibanaHttp = axios.create({
-      baseURL: kibanaBaseURL,
-      timeout: config.requestTimeoutMs,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `ApiKey ${config.kibanaApiKey}`,
-        'kbn-xsrf': 'true',
-      },
-    });
+      this.kibanaHttp = axios.create({
+        baseURL: kibanaBaseURL,
+        timeout: config.requestTimeoutMs,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `ApiKey ${config.elasticApiKey}`,
+          'kbn-xsrf': 'true',
+        },
+      });
+    } else {
+      this.kibanaHttp = null;
+    }
   }
 
   /**
@@ -132,15 +136,25 @@ export class ElasticsearchClient {
   }
 
   async kibanaGet(path: string): Promise<any> {
+    if (!this.kibanaHttp) {
+      throw new Error(
+        'KIBANA_URL is not configured. Set it to enable Kibana-specific features like alert status.',
+      );
+    }
     return this.withRetry(async () => {
-      const response = await this.kibanaHttp.get(path);
+      const response = await this.kibanaHttp!.get(path);
       return response.data;
     });
   }
 
   async kibanaPost(path: string, body: Record<string, any>): Promise<any> {
+    if (!this.kibanaHttp) {
+      throw new Error(
+        'KIBANA_URL is not configured. Set it to enable Kibana-specific features like alert status.',
+      );
+    }
     return this.withRetry(async () => {
-      const response = await this.kibanaHttp.post(path, body);
+      const response = await this.kibanaHttp!.post(path, body);
       return response.data;
     });
   }
@@ -153,12 +167,17 @@ export class ElasticsearchClient {
   }
 
   async findAlertingRules(params: Record<string, string | number>): Promise<any> {
+    if (!this.kibanaHttp) {
+      throw new Error(
+        'KIBANA_URL is not configured. Set it to enable Kibana-specific features like alert status.',
+      );
+    }
     return this.withRetry(async () => {
       const query = new URLSearchParams(
         Object.entries(params).map(([k, v]) => [k, String(v)])
       ).toString();
       const path = `/api/alerting/rules/_find${query ? `?${query}` : ''}`;
-      const response = await this.kibanaHttp.get(path);
+      const response = await this.kibanaHttp!.get(path);
       return response.data;
     });
   }

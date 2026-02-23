@@ -10,7 +10,7 @@
 import type { Resource } from '@mastra/mcp';
 
 export const resource: Resource = {
-  uri: 'kibana-banking://resources/elasticsearch-best-practices',
+  uri: 'elastic-banking://resources/elasticsearch-best-practices',
   name: 'Elasticsearch Best Practices for Banking',
   description:
     'Guidelines for constructing efficient, safe, and compliant Elasticsearch queries ' +

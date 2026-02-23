@@ -18,7 +18,7 @@ import { ServerConfig } from './config';
 export interface AuditEntry {
   /** ISO 8601 timestamp of the invocation. */
   timestamp: string;
-  /** MCP tool ID (e.g., `kibana_search`, `discover_cluster`). */
+  /** MCP tool ID (e.g., `elastic_search`, `discover_cluster`). */
   tool_called: string;
   /** Serialized input parameters (truncated to 500 chars for safety). */
   input_parameters: string;

@@ -1,6 +1,6 @@
-# Kibana MCP Server for Digital Banking
+# Elastic MCP Server for Digital Banking
 
-A secure [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that connects LLM-powered agents to Elasticsearch and Kibana. Built for digital banking teams where Business Managers, Architects, and Developers need conversational access to operational data — without writing KQL or Elasticsearch DSL by hand.
+A stdio [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for Elasticsearch with multi-stage PII redaction, suitable for financial institutions or regulated environments. Built for digital banking teams where Business Managers, Architects, and Developers need conversational access to operational data — without writing KQL or Elasticsearch DSL by hand.
 
 ---
 
@@ -17,7 +17,7 @@ A secure [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server
    - [Connect to Claude Desktop](#connect-to-claude-desktop)
 5. [Tools Reference](#5-tools-reference)
    - [discover_cluster](#discover_cluster)
-   - [kibana_search](#kibana_search)
+   - [elastic_search](#elastic_search)
    - [check_cluster_health](#check_cluster_health)
    - [get_alert_status](#get_alert_status)
 6. [Prompts & Resources](#6-prompts--resources)
@@ -28,6 +28,8 @@ A secure [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server
    - [Audit Trail](#audit-trail)
 8. [Type System](#8-type-system)
 9. [Testing](#9-testing)
+   - [Unit & Integration Tests](#unit--integration-tests)
+   - [Manual Redaction Demo](#manual-redaction-demo)
 10. [Project Structure](#10-project-structure)
 11. [Roadmap](#11-roadmap)
 12. [License](#12-license)
@@ -36,14 +38,14 @@ A secure [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server
 
 ## 1. Why This Exists
 
-Digital banking tribes sit on massive telemetry: payment rails (SWIFT gpi, SEPA), customer session data, APM traces, and microservice logs. Querying this data today requires mastering Elasticsearch DSL or relying on pre-built Kibana dashboards that may not answer ad-hoc questions.
+Digital banking tribes sit on massive telemetry: payment rails (SWIFT gpi, SEPA), customer session data, APM traces, and microservice logs. Querying this data today requires mastering Elasticsearch DSL or relying on pre-built dashboards that may not answer ad-hoc questions.
 
 This MCP server bridges that gap. It lets an LLM agent discover your cluster, understand index structures, execute read-only queries, and check platform health — all through a secure, audited pipeline that redacts PII before data ever leaves your infrastructure.
 
 | Persona                | What they get                                                                                                                                    |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Business Manager**   | Ask natural-language questions about transaction volumes, onboarding funnels, or liquidity metrics. The agent builds the DSL query for you.      |
-| **Software Architect** | Explore cluster topology, review index mappings, and assess system health without context-switching to Kibana.                                   |
+| **Software Architect** | Explore cluster topology, review index mappings, and assess system health without context-switching to external dashboards.                      |
 | **Developer**          | Debug by correlating logs across microservices. Search for error patterns, trace transaction IDs, and inspect alerting rules — conversationally. |
 
 ---
@@ -53,7 +55,7 @@ This MCP server bridges that gap. It lets an LLM agent discover your cluster, un
 - **Cluster Discovery** — Auto-discovers indices, field mappings, and doc counts so the agent knows what data is available before querying.
 - **Read-Only Search** — Executes Elasticsearch DSL queries with enforced read-only guardrails. Blocked keywords (`_update`, `_delete`, `_bulk`, `script`) are rejected at the input sanitization layer.
 - **Cluster Health** — Returns overall cluster status (green/yellow/red), node counts, shard counts, and unassigned shard details at cluster, index, or shard granularity.
-- **Alert Status** — Retrieves Kibana alerting rules with their last execution status, supporting filtering by rule type, severity tag, and execution state.
+- **Alert Status** — Retrieves Kibana alerting rules with their last execution status, supporting filtering by rule type, severity tag, and execution state (requires optional `KIBANA_URL`).
 - **Time Range Filtering** — Natural time expressions (`now-24h`, `now-7d`) are merged into any query shape (bool, simple, or empty) automatically.
 - **PII Redaction** — Credit cards (Luhn-validated), IBANs, SSNs, emails, and phone numbers are masked before results reach the LLM. Defense-in-depth for PCI DSS and GDPR compliance.
 - **Audit Logging** — Every tool invocation is logged to stderr with tool name, parameters, execution time, redaction counts, and error details.
@@ -87,8 +89,8 @@ This MCP server bridges that gap. It lets an LLM agent discover your cluster, un
                                                 │
                                                 ▼
                                      ┌──────────────────────┐
-                                     │   Elasticsearch /    │
-                                     │   Kibana Cluster     │
+                                     │  Elasticsearch        │
+                                     │  Cluster              │
                                      └──────────────────────┘
 ```
 
@@ -101,14 +103,15 @@ Every tool invocation flows through a secure pipeline: **validate input** → **
 ### Prerequisites
 
 - Node.js 18+
-- An Elasticsearch / Kibana deployment (Elastic Cloud or self-hosted)
+- An Elasticsearch deployment (Elastic Cloud or self-hosted)
 - An API key with read-only privileges on the indices you want to expose
+- Compatible with Elasticsearch < 8.18 (before the built-in MCP builder feature was introduced in 8.18)
 
 ### Install & Build
 
 ```bash
 git clone <this-repo>
-cd kibana-assistant-mcp-server
+cd financial-elastic-mcp-server
 npm install
 npm run build:mcp
 ```
@@ -119,8 +122,11 @@ Create a `.env` file or export environment variables:
 
 ```bash
 # Required
+export ELASTIC_URL="https://your-deployment.es.us-east-1.aws.found.io"
+export ELASTIC_API_KEY="your-base64-encoded-api-key"
+
+# Optional — set to enable Kibana-specific features (e.g., get_alert_status)
 export KIBANA_URL="https://your-deployment.kb.us-east-1.aws.found.io"
-export KIBANA_API_KEY="your-base64-encoded-api-key"
 
 # Optional
 export ALLOWED_INDEX_PATTERNS="logs-*,transactions-*"  # Comma-separated. Empty = all indices.
@@ -132,8 +138,6 @@ export KIBANA_SPACE=""                                  # Kibana space (empty = 
 export AUDIT_ENABLED="true"                             # Audit logging to stderr (default true)
 export PII_REDACTION_ENABLED="true"                     # PII masking (default true)
 ```
-
-> **Note:** The Elasticsearch URL is derived automatically from the Kibana URL by replacing `.kb.` with `.es.` in the hostname. This convention matches Elastic Cloud deployments.
 
 ### Run
 
@@ -148,12 +152,12 @@ Add to your `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "kibana": {
+    "elastic": {
       "command": "node",
       "args": ["/absolute/path/to/dist/stdio.mjs"],
       "env": {
-        "KIBANA_URL": "https://your-deployment.kb.us-east-1.aws.found.io",
-        "KIBANA_API_KEY": "your-api-key"
+        "ELASTIC_URL": "https://your-deployment.es.us-east-1.aws.found.io",
+        "ELASTIC_API_KEY": "your-api-key"
       }
     }
   }
@@ -178,9 +182,9 @@ Returns indices sorted by doc count (largest first), each with a flat list of `{
 
 ---
 
-### `kibana_search`
+### `elastic_search`
 
-Executes a read-only Elasticsearch DSL query against an index.
+Executes a read-only Elasticsearch DSL query against an Elasticsearch index.
 
 | Parameter    | Type   | Default    | Description                                        |
 | ------------ | ------ | ---------- | -------------------------------------------------- |
@@ -207,7 +211,7 @@ Returns `status` (green / yellow / red), node counts, shard counts, and `unassig
 
 ### `get_alert_status`
 
-Retrieves Kibana alerting rules and their last execution status. Use this when investigating incidents to identify firing or erroring alerts. Returns a graceful error message if the Kibana Alerting plugin is not enabled or the API key lacks the required privileges.
+Retrieves Kibana alerting rules and their last execution status. Requires `KIBANA_URL` to be configured. Use this when investigating incidents to identify firing or erroring alerts. Returns a graceful error message if `KIBANA_URL` is not set or if the Kibana Alerting plugin is not enabled.
 
 | Parameter     | Type   | Default | Description                                                              |
 | ------------- | ------ | ------- | ------------------------------------------------------------------------ |
@@ -277,7 +281,7 @@ Every tool invocation produces a structured JSON log entry to stderr:
 ```json
 {
   "timestamp": "2026-02-15T10:30:00.000Z",
-  "tool_called": "kibana_search",
+  "tool_called": "elastic_search",
   "input_parameters": "{\"index\":\"transactions-*\",...}",
   "output_size_bytes": 4521,
   "redaction_count": 3,
@@ -312,6 +316,8 @@ The `type` field (`'success'` | `'error'`) is the discriminant. All branching on
 
 ## 9. Testing
 
+### Unit & Integration Tests
+
 The server ships with a comprehensive test suite built on [Vitest](https://vitest.dev/). Tests are co-located with their modules under `__tests__/` directories.
 
 ```bash
@@ -339,6 +345,38 @@ npm test
 
 All 82 tests pass on the current build.
 
+### Manual Redaction Demo
+
+`scripts/test-redaction.ts` is a self-contained script that runs the redaction engine against a realistic transaction-log payload so you can visually verify masking format and accuracy without an Elasticsearch cluster.
+
+```bash
+# Stage 1 only — no AWS credentials needed
+npm run test:redaction
+
+# Both stages — requires AWS credentials and Comprehend access
+npm run test:redaction -- --comprehend
+```
+
+**Stage 1** (regex, always runs) covers:
+
+| PII Type    | Example Input            | Masked Output         | Notes                          |
+| ----------- | ------------------------ | --------------------- | ------------------------------ |
+| Credit card | `4111 1111 1111 1111`    | `**** **** **** 1111` | Luhn-validated; fails-Luhn numbers are left untouched |
+| IBAN        | `DE89370400440532013000` | `DE89****3000`        |                                |
+| SSN         | `123-45-6789`            | `***-**-****`         |                                |
+| Email       | `john.doe@bank.com`      | `j***@bank.com`       |                                |
+| Phone       | `+31 6 1234 5678`        | `+31***78`            |                                |
+
+**Stage 2** (`--comprehend`) adds AWS Comprehend NER on top of the Stage 1 output, catching contextual PII that regex cannot:
+
+| PII Type       | Example Input              | Masked Output          |
+| -------------- | -------------------------- | ---------------------- |
+| Full name      | `John Doe`                 | `[REDACTED:NAME]`      |
+| Street address | `42 Main Street, Amsterdam`| `[REDACTED:ADDRESS]`   |
+| IP address     | `192.168.1.101`            | `[REDACTED:IP_ADDRESS]`|
+
+The script prints a summary after each stage showing `redactionCount` and `redactedTypes`, and explicitly confirms that the invalid-Luhn card number was preserved unchanged.
+
 ---
 
 ## 10. Project Structure
@@ -358,7 +396,7 @@ src/
 ├── tools/
 │   ├── index.ts                    # Tool registry
 │   ├── discoverCluster.ts          # discover_cluster tool
-│   ├── kibanaSearch.ts             # kibana_search tool
+│   ├── elasticSearch.ts            # elastic_search tool
 │   ├── checkClusterHealth.ts       # check_cluster_health tool
 │   ├── getAlertStatus.ts           # get_alert_status tool
 │   └── __tests__/                  # Integration tests for tools
@@ -376,19 +414,45 @@ src/
 │   └── __tests__/
 └── mastra/
     └── stdio.ts                    # MCP server entry point (stdio transport)
+scripts/
+└── test-redaction.ts               # Manual PII redaction demo (Stage 1 + optional Stage 2)
 ```
 
 ---
 
 ## 11. Roadmap
 
-This server implements the **Phase 1 foundation** of the strategic architecture described in the companion document. Future phases include:
+### This repo — Elastic < v8.18 compatibility
 
-- **Business Intelligence Tools** — `analyze_banking_funnel`, `get_liquidity_metrics`, `compare_cohort_retention` for the Manager persona
-- **Observability Tools** — `search_error_clusters`, `trace_transaction_journey` for the Developer persona
-- **Knowledge Base** — Semantic discovery of Kibana saved objects (dashboards, visualizations) via `find_knowledge_assets`
-- **SSE Transport** — HTTP/SSE deployment for multi-agent access from Slack, Teams, or internal platforms
-- **Async Search** — `_async_search` support for long-running aggregations over large time horizons
+Elastic v8.18 introduced a native [MCP builder](https://www.elastic.co/guide/en/kibana/current/mcp.html) that exposes Elasticsearch directly to LLMs without a custom server. For teams already on v8.18+, that feature covers most of what this repo provides.
+
+This repo is therefore scoped to **Elasticsearch deployments below v8.18** — self-hosted clusters, Elastic Cloud tiers, or air-gapped environments that cannot yet upgrade. It will be kept in maintenance mode: bug fixes, dependency updates, and the outstanding cleanup items below. No major new tools are planned here.
+
+### New repo — `elastic-pii-proxy`
+
+Elastic's native MCP server (v8.18+) is powerful but has no built-in PII redaction or compliance controls, which makes it unsuitable for regulated environments out of the box.
+
+The companion project will be a **lightweight MCP proxy** that sits between Elastic's official MCP server and the LLM or operator:
+
+```
+┌─────────────┐     MCP      ┌──────────────────┐     MCP      ┌─────────────────────┐
+│  LLM Agent  │ ◄──────────► │ elastic-pii-proxy │ ◄──────────► │ Elastic MCP (v8.18+)│
+│  (Claude,   │              │                  │              │                     │
+│   GPT, etc) │              │  PII Redaction   │              │  Native Elastic MCP │
+└─────────────┘              │  Audit Logging   │              └─────────────────────┘
+                             │  GDPR/DORA/CCPA  │
+                             └──────────────────┘
+```
+
+The proxy intercepts MCP responses from Elastic, runs the redaction pipeline, emits a compliance audit trail, and forwards the sanitised result to the LLM — without requiring any changes to the Elastic deployment itself.
+
+**Planned capabilities:**
+
+- Transparent MCP proxying — no changes to the upstream Elastic MCP configuration
+- Multi-stage PII redaction (regex + AWS Comprehend NER) carried over from this repo
+- Configurable compliance profiles (GDPR, DORA, CCPA field-level rules)
+- Structured audit log with redaction counts and field provenance
+- Zero-trust posture: no raw PII ever reaches the LLM
 
 ---
 
