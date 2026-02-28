@@ -14,7 +14,10 @@
  *
  * @module
  */
-import { createComprehendClient, redactStringWithComprehend } from './comprehendClient';
+import {
+  createComprehendClient,
+  redactStringWithComprehend,
+} from './comprehendClient';
 
 /** Result of scanning and redacting a tool response. */
 export interface RedactionResult {
@@ -179,7 +182,10 @@ async function redactRecursiveDeep(
   typesFound: Set<string>,
 ): Promise<{ result: any; count: number }> {
   if (typeof data === 'string') {
-    const { redacted, count, types } = await redactStringWithComprehend(data, client);
+    const { redacted, count, types } = await redactStringWithComprehend(
+      data,
+      client,
+    );
     for (const t of types) typesFound.add(t);
     return { result: redacted, count };
   }
@@ -188,7 +194,11 @@ async function redactRecursiveDeep(
     let totalCount = 0;
     const result: any[] = [];
     for (const item of data) {
-      const { result: r, count } = await redactRecursiveDeep(item, client, typesFound);
+      const { result: r, count } = await redactRecursiveDeep(
+        item,
+        client,
+        typesFound,
+      );
       result.push(r);
       totalCount += count;
     }
@@ -199,7 +209,11 @@ async function redactRecursiveDeep(
     let totalCount = 0;
     const result: Record<string, any> = {};
     for (const [key, value] of Object.entries(data)) {
-      const { result: r, count } = await redactRecursiveDeep(value, client, typesFound);
+      const { result: r, count } = await redactRecursiveDeep(
+        value,
+        client,
+        typesFound,
+      );
       result[key] = r;
       totalCount += count;
     }

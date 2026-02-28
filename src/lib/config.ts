@@ -1,35 +1,26 @@
 /**
- * Server configuration loaded from environment variables.
+ * Proxy configuration loaded from environment variables.
  *
- * Required variables: `ELASTIC_URL`, `ELASTIC_API_KEY`.
- * All other settings have sensible defaults for development.
+ * The proxy sits between an LLM agent and an upstream MCP server (e.g., Elastic v8.18+),
+ * scrubbing PII and emitting an audit trail before clean data reaches the model.
  *
  * @see {@link loadConfig} for the loader that populates this interface.
  */
-export interface ServerConfig {
-  /** Base URL of the Elasticsearch deployment (e.g., `https://xyz.es.us-east-1.aws.found.io` or `http://localhost:9200`). */
-  elasticsearchUrl: string;
-  /** Base URL of the Kibana deployment (optional — required only for Kibana-specific features like alert status). */
-  kibanaUrl?: string;
-  /** Base64-encoded API key for authenticating with Elasticsearch (and Kibana when KIBANA_URL is set). */
-  elasticApiKey: string;
-  /** Glob patterns restricting which indices the agent may access. Empty = unrestricted. */
-  allowedIndexPatterns: string[];
-  /** Hard cap on documents returned per search (1--500). Protects token budgets. */
-  maxSearchSize: number;
-  /** HTTP request timeout in milliseconds. */
-  requestTimeoutMs: number;
-  /** Number of retry attempts for transient failures (429, 503, network errors). */
-  retryAttempts: number;
-  /** Base delay in ms for exponential backoff between retries. */
-  retryDelayMs: number;
-  /** Kibana space slug (empty string = default space). */
-  kibanaSpace: string;
+export interface ProxyConfig {
+  /** Shell command used to spawn the upstream MCP server (e.g., `"node"`). */
+  command: string;
+  /** Arguments passed to the upstream command (e.g., `["/path/to/elastic-mcp/index.mjs"]`). */
+  args: string[];
+  /**
+   * Alternative: HTTP/SSE URL for the upstream MCP server.
+   * When set, stdio spawn is skipped and an HTTP client is used instead.
+   */
+  url: string | undefined;
+  /** Compliance profile to apply: GDPR | DORA | PCI_DSS | full */
+  complianceProfile: string;
   /** Whether to emit structured audit log entries to stderr. */
   auditEnabled: boolean;
-  /** Whether to scan and mask PII (credit cards, IBANs, SSNs, etc.) in tool responses. */
-  piiRedactionEnabled: boolean;
-  /** AWS region for Comprehend calls (e.g. 'us-east-1'). */
+  /** AWS region for Comprehend calls (e.g. `'us-east-1'`). */
   awsRegion: string;
   /** Whether to run Stage 2 NER-based PII redaction via AWS Comprehend. */
   comprehendEnabled: boolean;
@@ -38,40 +29,40 @@ export interface ServerConfig {
 /** @throws {Error} If the environment variable is not set. */
 function requiredEnv(name: string): string {
   const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
 }
 
+function parseArgs(raw: string): string[] {
+  return raw.split(/\s+/).filter(Boolean);
+}
+
 /**
- * Loads server configuration from environment variables.
+ * Loads proxy configuration from environment variables.
  *
- * `ELASTIC_URL` must point directly to your Elasticsearch instance.
- * `KIBANA_URL` is optional — set it only if you need Kibana-specific features
- * such as alert status retrieval.
+ * Either `UPSTREAM_MCP_COMMAND` (stdio) or `UPSTREAM_MCP_URL` (HTTP/SSE) must be set.
  *
- * @throws {Error} If required variables (`ELASTIC_URL`, `ELASTIC_API_KEY`) are missing.
+ * @throws {Error} If neither upstream source is configured.
  */
-export function loadConfig(): ServerConfig {
-  const maxSearchSizeRaw = parseInt(process.env.MAX_SEARCH_SIZE || '100', 10);
-  const maxSearchSize = Math.min(Math.max(1, maxSearchSizeRaw), 500);
+export function loadConfig(): ProxyConfig {
+  const command = process.env.UPSTREAM_MCP_COMMAND;
+  const url = process.env.UPSTREAM_MCP_URL || undefined;
+
+  if (!command && !url) {
+    throw new Error(
+      'Either UPSTREAM_MCP_COMMAND or UPSTREAM_MCP_URL must be set',
+    );
+  }
 
   return {
-    elasticsearchUrl: requiredEnv('ELASTIC_URL'),
-    kibanaUrl: process.env.KIBANA_URL || undefined,
-    elasticApiKey: requiredEnv('ELASTIC_API_KEY'),
-    allowedIndexPatterns: process.env.ALLOWED_INDEX_PATTERNS
-      ? process.env.ALLOWED_INDEX_PATTERNS.split(',').map((p) => p.trim()).filter(Boolean)
+    command: command ?? '',
+    args: command
+      ? parseArgs(process.env.UPSTREAM_MCP_ARGS ?? '')
       : [],
-    maxSearchSize,
-    requestTimeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10),
-    retryAttempts: parseInt(process.env.RETRY_ATTEMPTS || '3', 10),
-    retryDelayMs: parseInt(process.env.RETRY_DELAY_MS || '1000', 10),
-    kibanaSpace: process.env.KIBANA_SPACE || '',
+    url: url,
+    complianceProfile: process.env.COMPLIANCE_PROFILE ?? 'GDPR',
     auditEnabled: process.env.AUDIT_ENABLED !== 'false',
-    piiRedactionEnabled: process.env.PII_REDACTION_ENABLED !== 'false',
-    awsRegion: process.env.AWS_REGION || 'us-east-1',
+    awsRegion: process.env.AWS_REGION ?? 'us-east-1',
     comprehendEnabled: process.env.COMPREHEND_ENABLED === 'true',
   };
 }

@@ -5,7 +5,7 @@
   "main": "index.js",
   "bin": "dist/stdio.mjs",
   "scripts": {
-    "build:mcp": "tsup src/mastra/stdio.ts --format esm,cjs --no-splitting --dts && echo '#!/usr/bin/env node' | cat - dist/stdio.mjs > temp && mv temp dist/stdio.mjs && chmod +x dist/stdio.mjs",
+    "build:mcp": "tsup src/stdio.ts --format esm,cjs --no-splitting --dts && echo '#!/usr/bin/env node' | cat - dist/stdio.mjs > temp && mv temp dist/stdio.mjs && chmod +x dist/stdio.mjs",
     "test": "vitest run",
     "test:redaction": "tsup scripts/test-redaction.ts --format esm --no-splitting --outDir dist/scripts && node dist/scripts/test-redaction.mjs"
   },
@@ -14,10 +14,9 @@
   "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-comprehend": "^3.995.0",
-    "@mastra/core": "^1.2.0",
-    "@mastra/mcp": "^1.0.0",
-    "axios": "^1.13.4",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "dismatch": "^0.2.1",
+    "mcpose": "^1.1.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
   },

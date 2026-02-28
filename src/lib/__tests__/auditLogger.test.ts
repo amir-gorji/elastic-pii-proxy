@@ -1,29 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AuditLogger, AuditEntry } from '../auditLogger';
-import { ServerConfig } from '../config';
-
-function makeConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
-  return {
-    kibanaUrl: 'http://localhost:5601',
-    elasticsearchUrl: 'http://localhost:9200',
-    elasticApiKey: 'test-key',
-    allowedIndexPatterns: [],
-    maxSearchSize: 100,
-    requestTimeoutMs: 30000,
-    retryAttempts: 3,
-    retryDelayMs: 1000,
-    kibanaSpace: '',
-    auditEnabled: true,
-    piiRedactionEnabled: true,
-    ...overrides,
-  };
-}
+import { describe, it, expect, vi } from 'vitest';
+import { AuditLogger, type AuditEntry } from '../auditLogger.js';
+import { makeConfig } from '../../__tests__/fixtures.js';
 
 function makeEntry(overrides: Partial<AuditEntry> = {}): AuditEntry {
   return {
     timestamp: '2024-01-01T00:00:00.000Z',
-    tool_called: 'test_tool',
-    input_parameters: '{"key":"value"}',
+    upstream_tool: 'elastic_search',
+    compliance_profile: 'GDPR',
+    input_parameters: '{"q":"test"}',
     output_size_bytes: 100,
     redaction_count: 0,
     redacted_types: [],
@@ -34,37 +18,33 @@ function makeEntry(overrides: Partial<AuditEntry> = {}): AuditEntry {
 }
 
 describe('AuditLogger', () => {
-  let stderrSpy: ReturnType<typeof vi.spyOn>;
-
-  beforeEach(() => {
-    stderrSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-  });
-
-  it('writes JSON to stderr when enabled', () => {
-    const logger = new AuditLogger(makeConfig());
+  it('writes JSON to the writer when enabled', () => {
+    const writer = vi.fn();
+    const logger = new AuditLogger(makeConfig(), writer);
     const entry = makeEntry();
     logger.log(entry);
 
-    expect(stderrSpy).toHaveBeenCalledOnce();
-    const written = stderrSpy.mock.calls[0][0] as string;
-    const parsed = JSON.parse(written.trim());
-    expect(parsed.tool_called).toBe('test_tool');
+    expect(writer).toHaveBeenCalledOnce();
+    const parsed = JSON.parse(writer.mock.calls[0]![0].trim());
+    expect(parsed.upstream_tool).toBe('elastic_search');
+    expect(parsed.compliance_profile).toBe('GDPR');
     expect(parsed.status).toBe('success');
   });
 
   it('does not write when disabled', () => {
-    const logger = new AuditLogger(makeConfig({ auditEnabled: false }));
+    const writer = vi.fn();
+    const logger = new AuditLogger(makeConfig({ auditEnabled: false }), writer);
     logger.log(makeEntry());
-    expect(stderrSpy).not.toHaveBeenCalled();
+    expect(writer).not.toHaveBeenCalled();
   });
 
   it('truncates large input parameters', () => {
-    const logger = new AuditLogger(makeConfig());
+    const writer = vi.fn();
+    const logger = new AuditLogger(makeConfig(), writer);
     const longInput = 'x'.repeat(600);
     logger.log(makeEntry({ input_parameters: longInput }));
 
-    const written = stderrSpy.mock.calls[0][0] as string;
-    const parsed = JSON.parse(written.trim());
+    const parsed = JSON.parse(writer.mock.calls[0]![0].trim());
     expect(parsed.input_parameters.length).toBeLessThan(600);
     expect(parsed.input_parameters).toContain('...[truncated]');
   });

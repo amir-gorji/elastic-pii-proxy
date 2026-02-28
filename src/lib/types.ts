@@ -23,14 +23,17 @@ import type { Model } from 'dismatch';
  *
  * @typeParam T - Shape of the `data` payload returned by the tool.
  */
-export type ToolSuccess<T> = Model<'success', {
-  /** The primary result payload. */
-  data: T;
-  /** Total hit count from Elasticsearch (when available). */
-  total?: number;
-  /** Raw Elasticsearch aggregation buckets (when the query includes aggs). */
-  aggregations?: Record<string, any>;
-}>;
+export type ToolSuccess<T> = Model<
+  'success',
+  {
+    /** The primary result payload. */
+    data: T;
+    /** Total hit count from Elasticsearch (when available). */
+    total?: number;
+    /** Raw Elasticsearch aggregation buckets (when the query includes aggs). */
+    aggregations?: Record<string, any>;
+  }
+>;
 
 /**
  * Failed tool execution. Carries a human-readable error message.

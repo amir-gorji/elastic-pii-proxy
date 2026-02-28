@@ -88,7 +88,11 @@ describe('piiRedaction', () => {
     it('handles non-string primitives', () => {
       const data = { count: 42, active: true, nothing: null };
       const result = redactPII(data);
-      expect(result.redactedData).toEqual({ count: 42, active: true, nothing: null });
+      expect(result.redactedData).toEqual({
+        count: 42,
+        active: true,
+        nothing: null,
+      });
       expect(result.redactionCount).toBe(0);
     });
   });
