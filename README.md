@@ -1,163 +1,97 @@
-# Elastic MCP Server for Digital Banking
+# elastic-pii-proxy
 
-A stdio [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for Elasticsearch with multi-stage PII redaction, suitable for financial institutions or regulated environments. Built for digital banking teams where Business Managers, Architects, and Developers need conversational access to operational data — without writing KQL or Elasticsearch DSL by hand.
+A **transparent MCP proxy** that sits between an LLM agent and an upstream MCP server (Elastic v8.18+, or any other). Intercepts tool calls and resource reads, redacts PII before results reach the model, and emits a GDPR-correct audit trail — raw PII never touches the audit log.
+
+Built as a composable middleware stack: each concern (PII redaction, audit logging, compliance profiles) is a pluggable brick. The proxy core is generic and reusable for any upstream MCP server.
 
 ---
 
 ## Table of Contents
 
-1. [Why This Exists](#1-why-this-exists)
-2. [Features](#2-features)
-3. [Architecture](#3-architecture)
-4. [Quick Start](#4-quick-start)
-   - [Prerequisites](#prerequisites)
-   - [Install & Build](#install--build)
-   - [Configure](#configure)
-   - [Run](#run)
-   - [Connect to Claude Desktop](#connect-to-claude-desktop)
-5. [Tools Reference](#5-tools-reference)
-   - [discover_cluster](#discover_cluster)
-   - [elastic_search](#elastic_search)
-   - [check_cluster_health](#check_cluster_health)
-   - [get_alert_status](#get_alert_status)
-6. [Prompts & Resources](#6-prompts--resources)
+1. [Architecture](#1-architecture)
+2. [Quick Start](#2-quick-start)
+3. [Environment Variables](#3-environment-variables)
+4. [Compliance Profiles](#4-compliance-profiles)
+5. [Middleware Execution Order](#5-middleware-execution-order)
+6. [Adding a Middleware](#6-adding-a-middleware)
 7. [Security & Compliance](#7-security--compliance)
-   - [PII Redaction](#pii-redaction)
-   - [Input Sanitization](#input-sanitization)
-   - [Index Access Control](#index-access-control)
-   - [Audit Trail](#audit-trail)
-8. [Type System](#8-type-system)
-9. [Testing](#9-testing)
-   - [Unit & Integration Tests](#unit--integration-tests)
-   - [Manual Redaction Demo](#manual-redaction-demo)
-10. [Project Structure](#10-project-structure)
-11. [Roadmap](#11-roadmap)
-12. [License](#12-license)
+8. [Testing](#8-testing)
+9. [Project Structure](#9-project-structure)
+10. [License](#10-license)
 
 ---
 
-## 1. Why This Exists
-
-Digital banking tribes sit on massive telemetry: payment rails (SWIFT gpi, SEPA), customer session data, APM traces, and microservice logs. Querying this data today requires mastering Elasticsearch DSL or relying on pre-built dashboards that may not answer ad-hoc questions.
-
-This MCP server bridges that gap. It lets an LLM agent discover your cluster, understand index structures, execute read-only queries, and check platform health — all through a secure, audited pipeline that redacts PII before data ever leaves your infrastructure.
-
-| Persona                | What they get                                                                                                                                    |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Business Manager**   | Ask natural-language questions about transaction volumes, onboarding funnels, or liquidity metrics. The agent builds the DSL query for you.      |
-| **Software Architect** | Explore cluster topology, review index mappings, and assess system health without context-switching to external dashboards.                      |
-| **Developer**          | Debug by correlating logs across microservices. Search for error patterns, trace transaction IDs, and inspect alerting rules — conversationally. |
-
----
-
-## 2. Features
-
-- **Cluster Discovery** — Auto-discovers indices, field mappings, and doc counts so the agent knows what data is available before querying.
-- **Read-Only Search** — Executes Elasticsearch DSL queries with enforced read-only guardrails. Blocked keywords (`_update`, `_delete`, `_bulk`, `script`) are rejected at the input sanitization layer.
-- **Cluster Health** — Returns overall cluster status (green/yellow/red), node counts, shard counts, and unassigned shard details at cluster, index, or shard granularity.
-- **Alert Status** — Retrieves Kibana alerting rules with their last execution status, supporting filtering by rule type, severity tag, and execution state (requires optional `KIBANA_URL`).
-- **Time Range Filtering** — Natural time expressions (`now-24h`, `now-7d`) are merged into any query shape (bool, simple, or empty) automatically.
-- **PII Redaction** — Credit cards (Luhn-validated), IBANs, SSNs, emails, and phone numbers are masked before results reach the LLM. Defense-in-depth for PCI DSS and GDPR compliance.
-- **Audit Logging** — Every tool invocation is logged to stderr with tool name, parameters, execution time, redaction counts, and error details.
-- **Index Access Control** — Restrict which indices the agent can touch via `ALLOWED_INDEX_PATTERNS`.
-- **Retry with Backoff** — Transient failures (429, 503, network errors) are retried with exponential backoff.
-
----
-
-## 3. Architecture
+## 1. Architecture
 
 ```
-┌─────────────┐     stdio / SSE      ┌──────────────────────┐
-│  LLM Agent  │ ◄──────────────────► │   MCP Server         │
-│  (Claude,   │                      │                      │
-│   GPT, etc) │                      │  ┌────────────────┐  │
-└─────────────┘                      │  │ Input Sanitizer │  │
-                                     │  └───────┬────────┘  │
-                                     │          ▼           │
-                                     │  ┌────────────────┐  │
-                                     │  │  Tool Execute   │  │
-                                     │  └───────┬────────┘  │
-                                     │          ▼           │
-                                     │  ┌────────────────┐  │
-                                     │  │ PII Redaction   │  │
-                                     │  └───────┬────────┘  │
-                                     │          ▼           │
-                                     │  ┌────────────────┐  │
-                                     │  │ Audit Logger    │  │
-                                     │  └────────────────┘  │
-                                     └──────────┬───────────┘
-                                                │
-                                                ▼
-                                     ┌──────────────────────┐
-                                     │  Elasticsearch        │
-                                     │  Cluster              │
-                                     └──────────────────────┘
+┌─────────────┐  MCP (stdio)  ┌────────────────────────────────────────┐  MCP (stdio)  ┌──────────────────┐
+│  LLM Agent  │ ◄────────────► │           elastic-pii-proxy            │ ◄────────────► │  Elastic MCP     │
+│  (Claude)   │               │                                        │               │  (v8.18+)        │
+└─────────────┘               │  compose([auditMW, piiMW])             │               └──────────────────┘
+                              │                                        │
+                              │  ┌──────────────────────────────────┐  │
+                              │  │  auditMiddleware  (outer layer)  │  │
+                              │  │  ┌──────────────────────────┐    │  │
+                              │  │  │  piiMiddleware  (inner)  │    │  │
+                              │  │  │   ┌──────────────────┐   │    │  │
+                              │  │  │   │  upstream call   │   │    │  │
+                              │  │  │   └──────────────────┘   │    │  │
+                              │  │  │  ↑ redact response here  │    │  │
+                              │  │  └──────────────────────────┘    │  │
+                              │  │  ↑ log AFTER redaction (safe)    │  │
+                              │  └──────────────────────────────────┘  │
+                              └────────────────────────────────────────┘
 ```
 
-Every tool invocation flows through a secure pipeline: **validate input** → **execute query** → **redact PII** → **log audit entry** → **return result**. This pipeline is implemented once in `createSecureTool` and shared by all tools.
+**Execution order** with `compose([auditMW, piiMW])`:
+
+| Step | Layer | Action |
+|------|-------|--------|
+| 1 | auditMW enter | capture `startTime` |
+| 2 | piiMW enter | call upstream |
+| 3 | — | upstream Elastic MCP returns raw data |
+| 4 | piiMW exit | redact PII from response |
+| 5 | auditMW exit | log **clean** result + timing (never logs raw PII) |
 
 ---
 
-## 4. Quick Start
+## 2. Quick Start
 
 ### Prerequisites
 
 - Node.js 18+
-- An Elasticsearch deployment (Elastic Cloud or self-hosted)
-- An API key with read-only privileges on the indices you want to expose
-- Compatible with Elasticsearch < 8.18 (before the built-in MCP builder feature was introduced in 8.18)
+- Elasticsearch v8.18+ with the native MCP server enabled (or any other MCP server)
 
 ### Install & Build
 
 ```bash
 git clone <this-repo>
-cd financial-elastic-mcp-server
+cd elastic-pii-proxy
 npm install
 npm run build:mcp
 ```
 
-### Configure
-
-Create a `.env` file or export environment variables:
+### Configure (stdio upstream)
 
 ```bash
-# Required
-export ELASTIC_URL="https://your-deployment.es.us-east-1.aws.found.io"
-export ELASTIC_API_KEY="your-base64-encoded-api-key"
-
-# Optional — set to enable Kibana-specific features (e.g., get_alert_status)
-export KIBANA_URL="https://your-deployment.kb.us-east-1.aws.found.io"
-
-# Optional
-export ALLOWED_INDEX_PATTERNS="logs-*,transactions-*"  # Comma-separated. Empty = all indices.
-export MAX_SEARCH_SIZE="100"                            # Max docs per search (1-500, default 100)
-export REQUEST_TIMEOUT_MS="30000"                       # HTTP timeout (default 30s)
-export RETRY_ATTEMPTS="3"                               # Retry count for transient failures
-export RETRY_DELAY_MS="1000"                            # Base delay for exponential backoff
-export KIBANA_SPACE=""                                  # Kibana space (empty = default space)
-export AUDIT_ENABLED="true"                             # Audit logging to stderr (default true)
-export PII_REDACTION_ENABLED="true"                     # PII masking (default true)
-```
-
-### Run
-
-```bash
-node dist/stdio.mjs
+export UPSTREAM_MCP_COMMAND="node"
+export UPSTREAM_MCP_ARGS="/path/to/elastic-mcp/index.mjs"
+export COMPLIANCE_PROFILE="GDPR"
 ```
 
 ### Connect to Claude Desktop
 
-Add to your `claude_desktop_config.json`:
-
 ```json
 {
   "mcpServers": {
-    "elastic": {
+    "elastic-pii-proxy": {
       "command": "node",
       "args": ["/absolute/path/to/dist/stdio.mjs"],
       "env": {
-        "ELASTIC_URL": "https://your-deployment.es.us-east-1.aws.found.io",
-        "ELASTIC_API_KEY": "your-api-key"
+        "UPSTREAM_MCP_COMMAND": "node",
+        "UPSTREAM_MCP_ARGS": "/path/to/elastic-mcp/index.mjs",
+        "COMPLIANCE_PROFILE": "GDPR",
+        "AUDIT_ENABLED": "true"
       }
     }
   }
@@ -166,122 +100,125 @@ Add to your `claude_desktop_config.json`:
 
 ---
 
-## 5. Tools Reference
+## 3. Environment Variables
 
-### `discover_cluster`
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `UPSTREAM_MCP_COMMAND` | one of the two | — | Command to spawn the upstream MCP server (e.g., `node`) |
+| `UPSTREAM_MCP_ARGS` | — | `""` | Space-separated args for the upstream command |
+| `UPSTREAM_MCP_URL` | one of the two | — | HTTP/SSE URL of an already-running upstream MCP server |
+| `COMPLIANCE_PROFILE` | — | `GDPR` | Active compliance profile: `GDPR` \| `DORA` \| `PCI_DSS` \| `full` |
+| `AUDIT_ENABLED` | — | `true` | Emit structured JSON audit entries to stderr |
+| `COMPREHEND_ENABLED` | — | `false` | Enable Stage 2 AWS Comprehend NER redaction |
+| `AWS_REGION` | — | `us-east-1` | AWS region for Comprehend API calls |
 
-**Start here.** Discovers all available indices and their field mappings. The agent should call this first to understand what data exists before constructing queries.
-
-| Parameter        | Type    | Default | Description                              |
-| ---------------- | ------- | ------- | ---------------------------------------- |
-| `pattern`        | string  | `*`     | Index pattern filter (e.g., `logs-*`)    |
-| `include_hidden` | boolean | `false` | Include system indices (`.kibana`, etc.) |
-| `max_indices`    | number  | `50`    | Cap on indices to fetch mappings for     |
-
-Returns indices sorted by doc count (largest first), each with a flat list of `{ field, type }` mappings.
-
----
-
-### `elastic_search`
-
-Executes a read-only Elasticsearch DSL query against an Elasticsearch index.
-
-| Parameter    | Type   | Default    | Description                                        |
-| ------------ | ------ | ---------- | -------------------------------------------------- |
-| `index`      | string | _required_ | Index pattern to search (e.g., `transactions-*`)   |
-| `query`      | object | _required_ | Elasticsearch DSL query body                       |
-| `size`       | number | `10`       | Results to return (capped by `MAX_SEARCH_SIZE`)    |
-| `time_range` | string | —          | Time filter expression (e.g., `now-24h`, `now-7d`) |
-
-The `time_range` parameter is automatically merged into whatever query shape you provide — bool queries, simple queries, or empty queries all work.
+Either `UPSTREAM_MCP_COMMAND` or `UPSTREAM_MCP_URL` must be set; the proxy throws at startup if neither is provided.
 
 ---
 
-### `check_cluster_health`
+## 4. Compliance Profiles
 
-Returns the health status of the Elasticsearch cluster. Use this to diagnose degraded or red clusters and verify platform health before investigating query or performance problems.
+A compliance profile selects which redaction stages are active.
 
-| Parameter | Type   | Default     | Description                                                                  |
-| --------- | ------ | ----------- | ---------------------------------------------------------------------------- |
-| `level`   | enum   | `"cluster"` | Granularity: `"cluster"`, `"indices"`, or `"shards"`. Higher levels include per-index or per-shard detail. |
+| Profile | Stage 1 (regex) | Stage 2 (Comprehend NER) | Focus |
+|---------|-----------------|--------------------------|-------|
+| `GDPR` | ✓ | ✓ (when enabled) | Names, addresses, dates, passport/driver IDs |
+| `DORA` | ✓ | ✗ | Regex-only; operational/financial data |
+| `PCI_DSS` | ✓ | ✗ | Regex-only; payment card data focus |
+| `full` | ✓ | ✓ (when enabled) | All stages, all entity types |
 
-Returns `status` (green / yellow / red), node counts, shard counts, and `unassigned_shards`.
+**Stage 1 — synchronous regex** always runs when enabled. Covers:
+
+| PII Type    | Example Input            | Masked Output          |
+|-------------|--------------------------|------------------------|
+| Credit card | `4111 1111 1111 1111`    | `**** **** **** 1111`  |
+| IBAN        | `DE89370400440532013000` | `DE89****3000`         |
+| SSN         | `123-45-6789`            | `***-**-****`          |
+| Email       | `john.doe@bank.com`      | `j***@bank.com`        |
+| Phone       | `+1 555-123-4567`        | `+15***67`             |
+
+Credit card detection uses Luhn validation to avoid false positives on random 16-digit sequences.
+
+**Stage 2 — AWS Comprehend NER** runs when both `COMPREHEND_ENABLED=true` and the profile has `stage2: true`. Catches contextual PII that regex cannot:
+
+| PII Type    | Example             | Masked Output           |
+|-------------|---------------------|-------------------------|
+| Full name   | `John Doe`          | `[REDACTED:NAME]`       |
+| Address     | `42 Main St`        | `[REDACTED:ADDRESS]`    |
+| IP address  | `192.168.1.101`     | `[REDACTED:IP_ADDRESS]` |
 
 ---
 
-### `get_alert_status`
+## 5. Middleware Execution Order
 
-Retrieves Kibana alerting rules and their last execution status. Requires `KIBANA_URL` to be configured. Use this when investigating incidents to identify firing or erroring alerts. Returns a graceful error message if `KIBANA_URL` is not set or if the Kibana Alerting plugin is not enabled.
+The pipeline is built with `compose([auditMW, piiToolMW])` — a Koa-style onion model where the **first element is the outermost layer**.
 
-| Parameter     | Type   | Default | Description                                                              |
-| ------------- | ------ | ------- | ------------------------------------------------------------------------ |
-| `severity`    | string | —       | Filter by severity tag (e.g., `"critical"`, `"warning"`)                 |
-| `rule_type`   | string | —       | Filter by rule type ID (e.g., `".es-query"`, `"apm.error_rate"`)         |
-| `status`      | enum   | —       | Client-side filter: `"active"`, `"inactive"`, `"error"`, or `"ok"`      |
-| `max_results` | number | `20`    | Maximum number of rules to return                                        |
+```
+compose([auditMW, piiMW])
+
+Request in ──► auditMW.enter ──► piiMW.enter ──► upstream
+                                                     │
+Response  ◄── auditMW.exit  ◄── piiMW.exit  ◄───────┘
+             (logs clean)       (redacts PII)
+```
+
+This ordering guarantees that the audit trail never contains raw PII — it reads from the already-redacted result that `piiMW` returns.
+
+The composed pipeline for resource reads is `compose([piiResourceMW])` — no audit middleware there, since resources are static reference content (not query results).
 
 ---
 
-## 6. Prompts & Resources
+## 6. Adding a Middleware
 
-The server exposes MCP **prompts** (guided workflows) and **resources** (static reference documents) alongside its tools.
+Every middleware is a pure function — no class inheritance, no global state.
 
-**Prompts** provide step-by-step investigation workflows that an LLM can follow:
+```typescript
+import type { Middleware } from './src/proxy/middleware.js';
+import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-| Prompt                            | Purpose                                                              |
-| --------------------------------- | -------------------------------------------------------------------- |
-| `investigate_failed_transactions` | Guided workflow for diagnosing payment failures in Elasticsearch     |
-| `compliance_audit_query`          | Structured approach to building PCI DSS / AML audit queries         |
-| `performance_investigation`       | Step-by-step investigation of latency or throughput regressions      |
+// 1. Define the type alias for readability
+type ToolCallMiddleware = Middleware<CallToolRequest, CallToolResult>;
 
-**Resources** are static reference documents the LLM can read:
+// 2. Write a factory function that returns the middleware
+export function createMyMiddleware(config: MyConfig): ToolCallMiddleware {
+  return async (req, next) => {
+    // — before upstream —
+    const result = await next(req);
+    // — after upstream (result is already processed by inner layers) —
+    return result;
+  };
+}
+```
 
-| Resource                        | Purpose                                                           |
-| ------------------------------- | ----------------------------------------------------------------- |
-| `banking_query_patterns`        | Common Elasticsearch query patterns for banking data              |
-| `elasticsearch_best_practices`  | Query optimization and index hygiene guidelines                   |
-| `banking_domain_glossary`       | Definitions for domain terms (SWIFT, SEPA, IBAN, liquidity, etc.) |
+```typescript
+// 3. Wire it into the pipeline in src/mastra/stdio.ts
+import { compose } from './proxy/middleware.js';
+
+const myMW = createMyMiddleware(myConfig);
+
+// Outermost first — myMW sees the result after piiMW has already redacted it
+const toolPipeline = compose([auditMW, myMW, piiToolMW]);
+```
+
+Middlewares can:
+- **Transform the request** before passing to `next` (e.g., add metadata)
+- **Transform the response** after `next` returns (e.g., redact, filter, enrich)
+- **Short-circuit** (return early without calling `next`, e.g., cache hit)
+- **Handle errors** (catch from `next`, log, re-throw or return an error result)
 
 ---
 
 ## 7. Security & Compliance
 
-This server is designed for regulated environments. Multiple defense layers ensure sensitive data never reaches the LLM unprotected.
-
-### PII Redaction
-
-All tool responses pass through a redaction layer before leaving the server. The following patterns are detected and masked:
-
-| Data Type   | Example Input            | Masked Output         |
-| ----------- | ------------------------ | --------------------- |
-| Credit Card | `4111 1111 1111 1111`    | `**** **** **** 1111` |
-| IBAN        | `DE89370400440532013000` | `DE89****3000`        |
-| SSN         | `123-45-6789`            | `***-**-****`         |
-| Email       | `john.doe@bank.com`      | `j***@bank.com`       |
-| Phone       | `+1 555-123-4567`        | `+15***67`            |
-
-Credit card detection uses Luhn validation to avoid false positives on random 16-digit numbers.
-
-### Input Sanitization
-
-Every query is scanned for dangerous keywords before execution:
-
-- `script`, `_update`, `_delete`, `_bulk`, `ctx._source`
-
-Index names are validated against a strict regex (`[a-zA-Z0-9\-.*,_]+`) to prevent injection.
-
-### Index Access Control
-
-Set `ALLOWED_INDEX_PATTERNS` to restrict which indices the agent can query. When set, any request to an index outside these patterns is rejected. This enforces the **Principle of Least Privilege** at the MCP layer, complementing Elastic's native RBAC.
-
 ### Audit Trail
 
-Every tool invocation produces a structured JSON log entry to stderr:
+Every tool call produces a structured JSON line to stderr **after** PII redaction:
 
 ```json
 {
   "timestamp": "2026-02-15T10:30:00.000Z",
-  "tool_called": "elastic_search",
+  "upstream_tool": "elastic_search",
+  "compliance_profile": "GDPR",
   "input_parameters": "{\"index\":\"transactions-*\",...}",
   "output_size_bytes": 4521,
   "redaction_count": 3,
@@ -291,171 +228,70 @@ Every tool invocation produces a structured JSON log entry to stderr:
 }
 ```
 
-Input parameters are truncated at 500 characters to prevent sensitive data from leaking into logs.
+Input parameters are truncated at 500 characters. The audit log never contains raw PII — it always reflects the post-redaction state.
+
+### Zero raw PII in logs
+
+Audit middleware is the **outer** layer (`compose([auditMW, piiMW])`). By the time `auditMW.exit` runs, `piiMW` has already redacted the response. This is enforced structurally by the compose order, not by convention.
 
 ---
 
-## 8. Type System
-
-Tool results use [dismatch](https://www.npmjs.com/package/dismatch) discriminated unions for type-safe pattern matching:
-
-```ts
-import type { Model } from 'dismatch';
-
-type ToolResult<T> = ToolSuccess<T> | ToolError;
-type ToolSuccess<T> = Model<
-  'success',
-  { data: T; total?: number; aggregations?: Record<string, any> }
->;
-type ToolError = Model<'error', { error: string }>;
-```
-
-The `type` field (`'success'` | `'error'`) is the discriminant. All branching on tool results uses `match()` from dismatch for exhaustive, compile-time-checked pattern matching — no `if/else` chains or `switch` statements.
-
----
-
-## 9. Testing
-
-### Unit & Integration Tests
-
-The server ships with a comprehensive test suite built on [Vitest](https://vitest.dev/). Tests are co-located with their modules under `__tests__/` directories.
+## 8. Testing
 
 ```bash
+# Unit tests (52 tests across 7 files)
 npm test
-```
 
-**Unit tests** cover individual library modules in isolation:
-
-| Module              | What is tested                                              |
-| ------------------- | ----------------------------------------------------------- |
-| `piiRedaction`      | Pattern detection accuracy, Luhn validation, masking format |
-| `inputSanitizer`    | Blocked keyword detection, index name validation            |
-| `mappingUtils`      | Field flattening, multi-field expansion, deduplication      |
-| `auditLogger`       | Log format, truncation, stderr routing                      |
-
-**Integration tests** exercise the full tool execution pipeline end-to-end (input → execute → PII redaction → result), with the HTTP layer replaced by mock fns:
-
-| Tool / Module             | Key scenarios covered                                             |
-| ------------------------- | ----------------------------------------------------------------- |
-| `discoverCluster`         | Index discovery, hidden-index filtering, mapping fetch failures   |
-| `checkClusterHealth`      | Cluster/indices/shards level output, argument pass-through        |
-| `getAlertStatus`          | Rule normalization, KQL filter building, 404/403 graceful errors  |
-| `prompts`                 | Prompt registration, argument schemas, template rendering         |
-| `resources`               | Resource registration, URI resolution, content integrity          |
-
-All 82 tests pass on the current build.
-
-### Manual Redaction Demo
-
-`scripts/test-redaction.ts` is a self-contained script that runs the redaction engine against a realistic transaction-log payload so you can visually verify masking format and accuracy without an Elasticsearch cluster.
-
-```bash
-# Stage 1 only — no AWS credentials needed
+# Manual PII redaction demo (no upstream needed)
 npm run test:redaction
 
-# Both stages — requires AWS credentials and Comprehend access
-npm run test:redaction -- --comprehend
+# Build
+npm run build:mcp
 ```
 
-**Stage 1** (regex, always runs) covers:
+Test coverage:
 
-| PII Type    | Example Input            | Masked Output         | Notes                          |
-| ----------- | ------------------------ | --------------------- | ------------------------------ |
-| Credit card | `4111 1111 1111 1111`    | `**** **** **** 1111` | Luhn-validated; fails-Luhn numbers are left untouched |
-| IBAN        | `DE89370400440532013000` | `DE89****3000`        |                                |
-| SSN         | `123-45-6789`            | `***-**-****`         |                                |
-| Email       | `john.doe@bank.com`      | `j***@bank.com`       |                                |
-| Phone       | `+31 6 1234 5678`        | `+31***78`            |                                |
-
-**Stage 2** (`--comprehend`) adds AWS Comprehend NER on top of the Stage 1 output, catching contextual PII that regex cannot:
-
-| PII Type       | Example Input              | Masked Output          |
-| -------------- | -------------------------- | ---------------------- |
-| Full name      | `John Doe`                 | `[REDACTED:NAME]`      |
-| Street address | `42 Main Street, Amsterdam`| `[REDACTED:ADDRESS]`   |
-| IP address     | `192.168.1.101`            | `[REDACTED:IP_ADDRESS]`|
-
-The script prints a summary after each stage showing `redactionCount` and `redactedTypes`, and explicitly confirms that the invalid-Luhn card number was preserved unchanged.
+| File | What is tested |
+|------|----------------|
+| `src/proxy/__tests__/middleware.test.ts` | `compose()` ordering, error propagation, double-next guard |
+| `src/middlewares/__tests__/complianceProfiles.test.ts` | Profile selection, stage flags, unknown-profile fallback |
+| `src/middlewares/__tests__/piiRedaction.test.ts` | Email/SSN redaction, non-text passthrough, error result passthrough, metadata injection |
+| `src/middlewares/__tests__/audit.test.ts` | Log format, post-redaction ordering, error logging, disabled logger |
+| `src/lib/__tests__/auditLogger.test.ts` | JSON format, truncation, stderr routing |
+| `src/lib/__tests__/piiRedaction.test.ts` | Pattern accuracy, Luhn validation, recursive traversal |
+| `src/lib/__tests__/comprehendClient.test.ts` | Chunking, entity redaction, pre-filter short-circuit |
 
 ---
 
-## 10. Project Structure
+## 9. Project Structure
 
 ```
 src/
 ├── lib/
-│   ├── types.ts                    # ToolResult<T> discriminated union
-│   ├── config.ts                   # Environment-based configuration loader
-│   ├── esClient.ts                 # Elasticsearch/Kibana HTTP client with retry
-│   ├── toolWrapper.ts              # Secure tool pipeline (sanitize → execute → redact → audit)
-│   ├── piiRedaction.ts             # Regex-based PII detection and masking
-│   ├── inputSanitizer.ts           # Query validation and index name sanitization
-│   ├── auditLogger.ts              # Structured audit logging to stderr
-│   ├── mappingUtils.ts             # Elasticsearch mapping flattener
-│   └── __tests__/                  # Unit tests for lib modules
-├── tools/
-│   ├── index.ts                    # Tool registry
-│   ├── discoverCluster.ts          # discover_cluster tool
-│   ├── elasticSearch.ts            # elastic_search tool
-│   ├── checkClusterHealth.ts       # check_cluster_health tool
-│   ├── getAlertStatus.ts           # get_alert_status tool
-│   └── __tests__/                  # Integration tests for tools
-├── prompts/
-│   ├── index.ts                    # Prompt registry
-│   ├── investigateFailedTransactions.ts
-│   ├── complianceAuditQuery.ts
-│   ├── performanceInvestigation.ts
+│   ├── config.ts               # ProxyConfig — env var loader
+│   ├── auditLogger.ts          # AuditLogger — structured JSON to stderr
+│   ├── piiRedaction.ts         # Stage 1 regex redaction engine
+│   ├── comprehendClient.ts     # Stage 2 AWS Comprehend NER wrapper
+│   ├── types.ts                # ToolResult<T> discriminated union (dismatch)
 │   └── __tests__/
-├── resources/
-│   ├── index.ts                    # Resource registry
-│   ├── bankingQueryPatterns.ts
-│   ├── elasticsearchBestPractices.ts
-│   ├── bankingDomainGlossary.ts
+├── proxy/
+│   ├── middleware.ts           # Middleware<Req,Res> type + compose()
+│   ├── backendClient.ts        # createBackendClient() — MCP SDK Client factory
+│   ├── core.ts                 # startProxy() — wires MCPServer + backend + pipelines
+│   └── __tests__/
+├── middlewares/
+│   ├── complianceProfiles.ts   # Profile definitions + getProfile()
+│   ├── piiRedaction.ts         # createPiiToolMiddleware() + createPiiResourceMiddleware()
+│   ├── audit.ts                # createAuditMiddleware()
 │   └── __tests__/
 └── mastra/
-    └── stdio.ts                    # MCP server entry point (stdio transport)
+    └── stdio.ts                # Entry point — composes pipeline, boots proxy
 scripts/
-└── test-redaction.ts               # Manual PII redaction demo (Stage 1 + optional Stage 2)
+└── test-redaction.ts           # Manual PII demo script
 ```
 
 ---
 
-## 11. Roadmap
-
-### This repo — Elastic < v8.18 compatibility
-
-Elastic v8.18 introduced a native [MCP builder](https://www.elastic.co/guide/en/kibana/current/mcp.html) that exposes Elasticsearch directly to LLMs without a custom server. For teams already on v8.18+, that feature covers most of what this repo provides.
-
-This repo is therefore scoped to **Elasticsearch deployments below v8.18** — self-hosted clusters, Elastic Cloud tiers, or air-gapped environments that cannot yet upgrade. It will be kept in maintenance mode: bug fixes, dependency updates, and the outstanding cleanup items below. No major new tools are planned here.
-
-### New repo — `elastic-pii-proxy`
-
-Elastic's native MCP server (v8.18+) is powerful but has no built-in PII redaction or compliance controls, which makes it unsuitable for regulated environments out of the box.
-
-The companion project will be a **lightweight MCP proxy** that sits between Elastic's official MCP server and the LLM or operator:
-
-```
-┌─────────────┐     MCP      ┌──────────────────┐     MCP      ┌─────────────────────┐
-│  LLM Agent  │ ◄──────────► │ elastic-pii-proxy │ ◄──────────► │ Elastic MCP (v8.18+)│
-│  (Claude,   │              │                  │              │                     │
-│   GPT, etc) │              │  PII Redaction   │              │  Native Elastic MCP │
-└─────────────┘              │  Audit Logging   │              └─────────────────────┘
-                             │  GDPR/DORA/CCPA  │
-                             └──────────────────┘
-```
-
-The proxy intercepts MCP responses from Elastic, runs the redaction pipeline, emits a compliance audit trail, and forwards the sanitised result to the LLM — without requiring any changes to the Elastic deployment itself.
-
-**Planned capabilities:**
-
-- Transparent MCP proxying — no changes to the upstream Elastic MCP configuration
-- Multi-stage PII redaction (regex + AWS Comprehend NER) carried over from this repo
-- Configurable compliance profiles (GDPR, DORA, CCPA field-level rules)
-- Structured audit log with redaction counts and field provenance
-- Zero-trust posture: no raw PII ever reaches the LLM
-
----
-
-## 12. License
+## 10. License
 
 MIT — free to use, modify, and distribute.

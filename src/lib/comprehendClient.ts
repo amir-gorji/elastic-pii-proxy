@@ -69,7 +69,9 @@ export function chunkText(text: string): string[] {
           let hi = remaining.length;
           while (lo < hi - 1) {
             const mid = Math.floor((lo + hi) / 2);
-            if (encoder.encode(remaining.slice(0, mid)).length <= CHUNK_BYTE_LIMIT) {
+            if (
+              encoder.encode(remaining.slice(0, mid)).length <= CHUNK_BYTE_LIMIT
+            ) {
               lo = mid;
             } else {
               hi = mid;
@@ -96,7 +98,10 @@ export function chunkText(text: string): string[] {
  * Applies span-based redaction to a single text chunk using Comprehend entity results.
  * Processes spans in reverse offset order to preserve validity of earlier offsets.
  */
-function applyRedactions(text: string, entities: PiiEntity[]): { redacted: string; count: number; types: Set<string> } {
+function applyRedactions(
+  text: string,
+  entities: PiiEntity[],
+): { redacted: string; count: number; types: Set<string> } {
   const types = new Set<string>();
 
   const relevant = entities
@@ -114,7 +119,8 @@ function applyRedactions(text: string, entities: PiiEntity[]): { redacted: strin
     const begin = entity.BeginOffset!;
     const end = entity.EndOffset!;
     const type = entity.Type!;
-    redacted = redacted.slice(0, begin) + `[REDACTED:${type}]` + redacted.slice(end);
+    redacted =
+      redacted.slice(0, begin) + `[REDACTED:${type}]` + redacted.slice(end);
     types.add(type);
   }
 
@@ -139,7 +145,10 @@ export async function redactStringWithComprehend(
   // Pre-filter: skip the more expensive DetectPiiEntities call if Comprehend
   // says the text contains no PII at all.
   const preFilter = await client.send(
-    new ContainsPiiEntitiesCommand({ Text: text.slice(0, 4500), LanguageCode: 'en' }),
+    new ContainsPiiEntitiesCommand({
+      Text: text.slice(0, 4500),
+      LanguageCode: 'en',
+    }),
   );
   if (!preFilter.Labels || preFilter.Labels.length === 0) {
     return empty;
@@ -161,7 +170,11 @@ export async function redactStringWithComprehend(
     for (const t of types) allTypes.add(t);
   }
 
-  return { redacted: redactedChunks.join('\n'), count: totalCount, types: allTypes };
+  return {
+    redacted: redactedChunks.join('\n'),
+    count: totalCount,
+    types: allTypes,
+  };
 }
 
 /** Creates a configured AWS Comprehend client for the given region. */

@@ -7,9 +7,19 @@ import { chunkText, redactStringWithComprehend } from '../comprehendClient';
 vi.mock('@aws-sdk/client-comprehend', () => {
   const send = vi.fn();
   const ComprehendClient = vi.fn(() => ({ send }));
-  const ContainsPiiEntitiesCommand = vi.fn((input: any) => ({ __type: 'ContainsPii', input }));
-  const DetectPiiEntitiesCommand = vi.fn((input: any) => ({ __type: 'DetectPii', input }));
-  return { ComprehendClient, ContainsPiiEntitiesCommand, DetectPiiEntitiesCommand };
+  const ContainsPiiEntitiesCommand = vi.fn((input: any) => ({
+    __type: 'ContainsPii',
+    input,
+  }));
+  const DetectPiiEntitiesCommand = vi.fn((input: any) => ({
+    __type: 'DetectPii',
+    input,
+  }));
+  return {
+    ComprehendClient,
+    ContainsPiiEntitiesCommand,
+    DetectPiiEntitiesCommand,
+  };
 });
 
 // ---------------------------------------------------------------------------
@@ -18,7 +28,12 @@ vi.mock('@aws-sdk/client-comprehend', () => {
 
 async function makeMockClient(
   containsLabels: { Name: string }[],
-  detectEntities: { Type: string; BeginOffset: number; EndOffset: number; Score?: number }[],
+  detectEntities: {
+    Type: string;
+    BeginOffset: number;
+    EndOffset: number;
+    Score?: number;
+  }[],
 ) {
   const { ComprehendClient } = await import('@aws-sdk/client-comprehend');
   const instance = new (ComprehendClient as any)();
@@ -68,10 +83,14 @@ describe('redactStringWithComprehend', () => {
   });
 
   it('returns the string unchanged when ContainsPiiEntities reports no PII', async () => {
-    const { DetectPiiEntitiesCommand } = await import('@aws-sdk/client-comprehend');
+    const { DetectPiiEntitiesCommand } =
+      await import('@aws-sdk/client-comprehend');
     const client = await makeMockClient([], []);
 
-    const result = await redactStringWithComprehend('No sensitive data here.', client as any);
+    const result = await redactStringWithComprehend(
+      'No sensitive data here.',
+      client as any,
+    );
 
     expect(result.redacted).toBe('No sensitive data here.');
     expect(result.count).toBe(0);
@@ -108,14 +127,17 @@ describe('redactStringWithComprehend', () => {
 
     const result = await redactStringWithComprehend(text, client as any);
 
-    expect(result.redacted).toBe('[REDACTED:NAME] lives at [REDACTED:ADDRESS].');
+    expect(result.redacted).toBe(
+      '[REDACTED:NAME] lives at [REDACTED:ADDRESS].',
+    );
     expect(result.count).toBe(2);
     expect(result.types.has('NAME')).toBe(true);
     expect(result.types.has('ADDRESS')).toBe(true);
   });
 
   it('calls DetectPiiEntities multiple times for text exceeding 4500 bytes', async () => {
-    const { DetectPiiEntitiesCommand } = await import('@aws-sdk/client-comprehend');
+    const { DetectPiiEntitiesCommand } =
+      await import('@aws-sdk/client-comprehend');
     // 46 lines of 100 chars → more than one chunk.
     const line = 'a'.repeat(100);
     const text = Array.from({ length: 46 }, () => line).join('\n');
@@ -125,7 +147,9 @@ describe('redactStringWithComprehend', () => {
     await redactStringWithComprehend(text, client as any);
 
     // Should be called once per chunk (at least 2).
-    expect((DetectPiiEntitiesCommand as any).mock.calls.length).toBeGreaterThan(1);
+    expect((DetectPiiEntitiesCommand as any).mock.calls.length).toBeGreaterThan(
+      1,
+    );
   });
 
   it('ignores entity types not in the redact list', async () => {
